@@ -122,6 +122,12 @@ const SpeedControl = () => {
     e.stopPropagation();
   };
 
+  const handleResetSpeed = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSpeed(1);
+  };
+
   useEffect(() => {
     updateVideoSpeed(speed);
   }, [speed]);
@@ -153,7 +159,7 @@ const SpeedControl = () => {
       </button>
       <span
         onClick={handleMissClick}
-        onDoubleClick={handleDoubleClick}
+        onDoubleClick={handleResetSpeed}
         style={styles.speedText}
       >
         {speed}x
