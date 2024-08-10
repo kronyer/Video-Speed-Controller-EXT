@@ -21,6 +21,7 @@ const SpeedControl = () => {
       display: "flex",
       alignItems: "center",
       width: "13rem",
+      height: "2rem",
       justifyContent: "center",
       cursor: isDragging ? "grabbing" : "grab",
     },
@@ -35,6 +36,8 @@ const SpeedControl = () => {
     speedText: {
       fontSize: "18px",
       margin: "0 10px",
+      width: "33%",
+      textAlign: "center",
     },
   };
 
@@ -61,7 +64,6 @@ const SpeedControl = () => {
   const updateVideoSpeed = (newSpeed) => {
     const video = document.querySelector("video");
     if (video) {
-      console.log(`Updating video speed to ${newSpeed}`);
       video.playbackRate = newSpeed;
     } else {
       console.log("No video element found");
@@ -74,22 +76,39 @@ const SpeedControl = () => {
       x: e.clientX - position.x,
       y: e.clientY - position.y,
     };
-    console.log("Mouse down: isDragging set to true");
     e.preventDefault();
   };
 
   const handleMouseMove = (e) => {
     if (isDragging) {
-      const newX = e.clientX - dragStart.current.x;
-      const newY = e.clientY - dragStart.current.y;
-      console.log("Dragging: ", { x: newX, y: newY });
+      const videoElement = document.querySelector("video");
+      const videoRect = videoElement.getBoundingClientRect();
+
+      const remToPx = (rem) =>
+        rem * parseFloat(getComputedStyle(document.documentElement).fontSize);
+      const controlWidth = remToPx(parseFloat(styles.container.width));
+
+      let newX = e.clientX - dragStart.current.x;
+      if (newX < 0) {
+        newX = 0;
+      }
+      if (newX > videoRect.width - controlWidth) {
+        newX = videoRect.width - controlWidth;
+      }
+
+      let newY = e.clientY - dragStart.current.y;
+      if (newY < 0) {
+        newY = 0;
+      }
+      if (newY > videoRect.height - 100) {
+        newY = videoRect.height - 100;
+      }
       setPosition({ x: newX, y: newY });
       e.preventDefault();
     }
   };
 
-  const handleMouseUp = (e) => {
-    console.log("Mouse up: isDragging set to false");
+  const handleMouseUp = () => {
     setIsDragging(false);
   };
 
@@ -104,16 +123,13 @@ const SpeedControl = () => {
   };
 
   useEffect(() => {
-    console.log("isDragging updated: ", isDragging);
     updateVideoSpeed(speed);
   }, [speed]);
 
   useEffect(() => {
-    console.log("Adding event listeners for mousemove and mouseup");
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
     return () => {
-      console.log("Removing event listeners for mousemove and mouseup");
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
