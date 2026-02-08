@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 
-const SpeedControl = () => {
+
+const SpeedControl = ({ visible, setVisible }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [speed, setSpeed] = useState(1);
-  const [position, setPosition] = useState({ x: 10, y: 10 });
+  const [position, setPosition] = useState({ x: 10, y: 60 }); // Começa mais para baixo
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
@@ -128,9 +129,25 @@ const SpeedControl = () => {
     setSpeed(1);
   };
 
+
   useEffect(() => {
     updateVideoSpeed(speed);
   }, [speed]);
+
+  // Sincroniza o controle quando o vídeo muda por atalho
+  useEffect(() => {
+    function handleSpeedSync(e) {
+      if (e && e.detail && typeof e.detail === 'number') {
+        setSpeed(e.detail);
+      } else {
+        // fallback: pega do vídeo
+        const video = document.querySelector("video");
+        if (video) setSpeed(video.playbackRate);
+      }
+    }
+    window.addEventListener("extspeed-sync-speed", handleSpeedSync);
+    return () => window.removeEventListener("extspeed-sync-speed", handleSpeedSync);
+  }, []);
 
   useEffect(() => {
     document.addEventListener("mousemove", handleMouseMove);
@@ -141,6 +158,7 @@ const SpeedControl = () => {
     };
   }, [isDragging]); // Dependência de isDragging para garantir que os eventos sejam atualizados
 
+  if (!visible) return null;
   return (
     <div
       onClick={handleMissClick}
@@ -175,47 +193,179 @@ const SpeedControl = () => {
   );
 };
 
-const injectControls = () => {
-  console.log("Injecting controls");
+
+// Tenta injetar o controle, com logs detalhados e tentativas múltiplas
+
+// Estado global para visibilidade do controle
+let speedControlVisible = true;
+let setSpeedControlVisible = null;
+
+const injectControls = (retryCount = 0) => {
+  console.log(`[injectControls] Tentando injetar controles (tentativa ${retryCount})`);
   const videoPlayer = document.querySelector(".html5-video-container");
+  const video = document.querySelector("video");
 
-  if (videoPlayer) {
-    console.log("Video player container found");
-
-    // Verifica se a div de controles já existe
-    let controlsDiv = document.querySelector("#speed-control-div");
-
-    // Se a div já existe, removê-la
-    if (controlsDiv) {
-      console.log("Existing controls div found. Removing...");
-      videoPlayer.removeChild(controlsDiv);
+  if (!videoPlayer) {
+    console.log("[injectControls] .html5-video-container NÃO encontrado");
+    if (retryCount < 10) {
+      setTimeout(() => injectControls(retryCount + 1), 500);
     }
+    return;
+  }
+  if (!video) {
+    console.log("[injectControls] <video> NÃO encontrado");
+    if (retryCount < 10) {
+      setTimeout(() => injectControls(retryCount + 1), 500);
+    }
+    return;
+  }
 
-    // Cria uma nova div de controles
-    controlsDiv = document.createElement("div");
-    controlsDiv.id = "speed-control-div"; // Define um id para fácil referência futura
-    videoPlayer.appendChild(controlsDiv);
+  // Verifica se a div de controles já existe
+  let controlsDiv = document.querySelector("#speed-control-div");
+  if (controlsDiv) {
+    console.log("[injectControls] Div de controles já existe. Removendo...");
+    try {
+      videoPlayer.removeChild(controlsDiv);
+    } catch (e) {
+      console.log("[injectControls] Erro ao remover div antiga:", e);
+    }
+  }
 
+  // Cria uma nova div de controles
+  controlsDiv = document.createElement("div");
+  controlsDiv.id = "speed-control-div";
+  videoPlayer.appendChild(controlsDiv);
+
+  try {
     const root = createRoot(controlsDiv);
-    root.render(<SpeedControl />);
-  } else {
-    console.log("Video player container not found");
+    // Componente wrapper para controlar visibilidade
+    function Wrapper() {
+      const [visible, setVisible] = useState(speedControlVisible);
+      useEffect(() => {
+        setSpeedControlVisible = setVisible;
+      }, []);
+      return <SpeedControl visible={visible} setVisible={setVisible} />;
+    }
+    root.render(<Wrapper />);
+    console.log("[injectControls] Controle de velocidade injetado com sucesso!");
+  } catch (e) {
+    console.log("[injectControls] Erro ao renderizar SpeedControl:", e);
   }
 };
 
+
+// Tenta injetar controles quando o vídeo estiver pronto
 function checkAndInjectControls() {
-  console.log("Checking for video container");
+  console.log("[checkAndInjectControls] Checando elemento de vídeo");
   const interval = setInterval(() => {
-    console.log("Checking every 1s");
-
-    const videoContainer = document.querySelector(".html5-video-container");
-    if (videoContainer) {
-      console.log("Video container found");
-
-      injectControls();
-      clearInterval(interval);
+    const video = document.querySelector("video");
+    if (video) {
+      if (video.readyState >= 2) {
+        // Vídeo já pode ser reproduzido
+        injectControls();
+        clearInterval(interval);
+      } else {
+        // Espera o evento canplay
+        video.addEventListener("canplay", () => {
+          injectControls();
+        }, { once: true });
+        clearInterval(interval);
+      }
     }
-  }, 1000);
+  }, 500);
 }
 
-checkAndInjectControls();
+
+// Função para observar mudanças de vídeo (SPA/playlist)
+
+function observeVideoChanges() {
+  let lastVideoId = null;
+  let lastHref = location.href;
+  let lastPlayer = null;
+
+  function getVideoId() {
+    const url = new URL(window.location.href);
+    return url.searchParams.get("v");
+  }
+
+  function tryInject(force = false) {
+    const currentId = getVideoId();
+    const videoPlayer = document.querySelector(".html5-video-container");
+    const video = document.querySelector("video");
+    const controlsDiv = document.querySelector("#speed-control-div");
+
+    console.log(`[observeVideoChanges] tryInject: currentId=${currentId}, lastVideoId=${lastVideoId}, force=${force}`);
+    if (force || (currentId && currentId !== lastVideoId)) {
+      lastVideoId = currentId;
+      checkAndInjectControls();
+    } else if (videoPlayer && !controlsDiv && video) {
+      // Se o vídeo mudou mas o controle sumiu, tenta reinjetar
+      console.log("[observeVideoChanges] Controle sumiu, reinjetando!");
+      checkAndInjectControls();
+    }
+  }
+
+  // Observa mudanças no body (YouTube SPA)
+  const observer = new MutationObserver(() => {
+    tryInject();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  // Observa mudanças de URL (history API)
+  setInterval(() => {
+    if (location.href !== lastHref) {
+      lastHref = location.href;
+      tryInject(true);
+    }
+  }, 500);
+
+  // Observa mudanças no player (casos de playlist)
+  setInterval(() => {
+    const player = document.querySelector(".html5-video-container");
+    if (player !== lastPlayer) {
+      lastPlayer = player;
+      console.log("[observeVideoChanges] Player container mudou, tentando reinjetar");
+      tryInject(true);
+    }
+  }, 1000);
+
+  // Primeira injeção
+  tryInject(true);
+}
+
+
+// Atalhos de teclado globais
+window.addEventListener("keydown", (e) => {
+  // Ignora se está digitando em input/textarea
+  if (document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  if (e.repeat) return;
+  if (e.key === "d" || e.key === "D") {
+    // Aumenta velocidade
+    const video = document.querySelector("video");
+    if (video) {
+      let newSpeed = Math.min(video.playbackRate + 0.25, 10);
+      video.playbackRate = newSpeed;
+      // Atualiza controle visual
+      window.dispatchEvent(new CustomEvent("extspeed-sync-speed", { detail: newSpeed }));
+      if (setSpeedControlVisible) setSpeedControlVisible(true);
+    }
+    e.preventDefault();
+  } else if (e.key === "s" || e.key === "S") {
+    // Diminui velocidade
+    const video = document.querySelector("video");
+    if (video) {
+      let newSpeed = Math.max(video.playbackRate - 0.25, 0.25);
+      video.playbackRate = newSpeed;
+      window.dispatchEvent(new CustomEvent("extspeed-sync-speed", { detail: newSpeed }));
+      if (setSpeedControlVisible) setSpeedControlVisible(true);
+    }
+    e.preventDefault();
+  } else if (e.key === "v" || e.key === "V") {
+    // Esconde/mostra controle
+    speedControlVisible = !speedControlVisible;
+    if (setSpeedControlVisible) setSpeedControlVisible(speedControlVisible);
+    e.preventDefault();
+  }
+});
+
+observeVideoChanges();
